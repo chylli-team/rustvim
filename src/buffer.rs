@@ -1,6 +1,6 @@
 use std::io;
 
-#[derive(Default)]
+#[derive(Debug)]
 pub struct Buffer {
     lines: Vec<String>,
 }
@@ -8,7 +8,7 @@ pub struct Buffer {
 impl Buffer {
     pub fn new() -> Self {
         Self {
-            lines: vec![String::new()],
+            lines: Vec::new()
         }
     }
 
@@ -25,42 +25,57 @@ impl Buffer {
     }
 
     pub fn insert_line(&mut self, index: usize, line: String) {
-        self.lines.insert(index, line);
+        while index > self.lines.len() {
+            self.lines.push(String::new());
+        }
+        
+        if index == self.lines.len() {
+            self.lines.push(line);
+        } else {
+            self.lines.insert(index, line);
+        }
     }
 
     pub fn insert_char(&mut self, line: usize, col: usize, c: char) {
-        if let Some(line) = self.get_line_mut(line) {
-            // 如果插入位置超过当前行长度，先用空格填充
-            while line.len() < col {
-                line.push(' ');
+        while line >= self.lines.len() {
+            self.lines.push(String::new());
+        }
+
+        if let Some(line_content) = self.get_line_mut(line) {
+            while line_content.len() < col {
+                line_content.push(' ');
             }
-            line.insert(col, c);
+            line_content.insert(col, c);
         }
     }
 
     pub fn remove_char(&mut self, line: usize, col: usize) -> bool {
-        if let Some(line) = self.get_line_mut(line) {
-            if col < line.len() {
-                line.remove(col);
+        if let Some(line_content) = self.get_line_mut(line) {
+            if col < line_content.len() {
+                line_content.remove(col);
                 return true;
             }
         }
         false
     }
 
-    // 计算一行文本在屏幕上实际占用的行数
     pub fn line_screen_rows(&self, line_index: usize, term_width: u16) -> io::Result<u16> {
-        let empty_line = String::new();
-        let line = self.get_line(line_index).unwrap_or(&empty_line);
-        let content_width = line.len() + 5; // +5 是因为行号占用的空间
+        let line = match self.get_line(line_index) {
+            Some(line) => line,
+            None => return Ok(1),
+        };
+        
+        let content_width = line.len() + 5;
         Ok((content_width as u16 + term_width - 1) / term_width)
     }
 
-    // 获取指定行的指定屏幕行的内容
     pub fn get_line_part(&self, line_index: usize, row_index: u16, term_width: u16) -> String {
-        let empty_line = String::new();
-        let line = self.get_line(line_index).unwrap_or(&empty_line);
-        let effective_width = term_width - 5;  // 减去行号占用的空间
+        let line = match self.get_line(line_index) {
+            Some(line) => line,
+            None => return String::new(),
+        };
+        
+        let effective_width = term_width - 5;
         let start = row_index as usize * effective_width as usize;
         let end = start + effective_width as usize;
         
