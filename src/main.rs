@@ -11,7 +11,6 @@ enum Mode {
     Insert,
 }
 
-// 存储每行的内容
 struct Line {
     content: String,
 }
@@ -25,6 +24,16 @@ impl Line {
 
     fn len(&self) -> u16 {
         self.content.len() as u16
+    }
+
+    // 计算这行文本实际占用的屏幕行数
+    fn screen_lines(&self, term_width: u16) -> u16 {
+        let content_width = self.len() + 5; // +5 是因为行号占用的空间
+        if content_width == 0 {
+            1
+        } else {
+            (content_width + term_width - 1) / term_width
+        }
     }
 }
 
@@ -53,6 +62,29 @@ fn draw_line_number(line: u16) -> io::Result<()> {
     Ok(())
 }
 
+// 重新绘制从指定行开始的所有内容
+fn redraw_from(lines: &[Line], start_line: u16) -> io::Result<()> {
+    let (term_width, _) = terminal_size()?;
+    let mut screen_line = start_line;
+    
+    for (i, line) in lines.iter().enumerate() {
+        // 清除从当前行开始的内容
+        print!("{}", cursor::Goto(1, screen_line));
+        print!("{}", clear::CurrentLine);
+        
+        // 绘制行号
+        draw_line_number(screen_line)?;
+        
+        // 绘制内容
+        print!("{}", line.content);
+        
+        // 更新屏幕行号，考虑长行折行的情况
+        screen_line += line.screen_lines(term_width);
+    }
+    stdout().flush()?;
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
     let _raw = stdout().into_raw_mode()?;
     
@@ -61,19 +93,22 @@ fn main() -> io::Result<()> {
     
     println!("欢迎使用 RustVim! 按 Ctrl-c 退出\r");
     println!("按 i 进入插入模式，按 ESC 返回普通模式\r");
+    println!("普通模式命令: x(删除字符) o/O(插入新行) 0/$(行首/尾)\r");
     
     let stdin = io::stdin();
-    let mut lines: Vec<Line> = vec![Line::new()];  // 存储所有行
-    let mut current_line = 0;  // 当前行索引
-    let mut cursor_x = 5;  // 从行号后面开始
-    let mut cursor_y = 3;  // 从第3行开始
+    let mut lines: Vec<Line> = vec![Line::new()];
+    let mut current_line = 0;
+    let mut cursor_x = 5;
+    let mut cursor_y = 4;  // 从第4行开始，因为有三行提示信息
     let mut mode = Mode::Normal;
     
     show_mode(&mode)?;
-    draw_line_number(cursor_y)?;
+    redraw_from(&lines, cursor_y)?;
     
     print!("{}", cursor::Goto(cursor_x, cursor_y));
     stdout().flush()?;
+
+    let (term_width, _) = terminal_size()?;
 
     for key in stdin.keys() {
         match key? {
@@ -86,7 +121,6 @@ fn main() -> io::Result<()> {
                 }
             }
             Key::Right => {
-                // 限制光标不能超过当前行的内容长度
                 if cursor_x < lines[current_line].len() + 5 {
                     cursor_x += 1;
                     print!("{}", cursor::Right(1));
@@ -94,10 +128,11 @@ fn main() -> io::Result<()> {
                 }
             }
             Key::Up => {
-                if cursor_y > 3 && current_line > 0 {
+                if cursor_y > 4 && current_line > 0 {
+                    // 计算上一行占用的屏幕行数
+                    let prev_lines = lines[current_line - 1].screen_lines(term_width);
                     current_line -= 1;
-                    cursor_y -= 1;
-                    // 确保x坐标不超过新行的长度
+                    cursor_y -= prev_lines;
                     cursor_x = cursor_x.min(lines[current_line].len() + 5);
                     print!("{}", cursor::Goto(cursor_x, cursor_y));
                     stdout().flush()?;
@@ -105,9 +140,10 @@ fn main() -> io::Result<()> {
             }
             Key::Down => {
                 if current_line < lines.len() - 1 {
+                    // 计算当前行占用的屏幕行数
+                    let current_lines = lines[current_line].screen_lines(term_width);
                     current_line += 1;
-                    cursor_y += 1;
-                    // 确保x坐标不超过新行的长度
+                    cursor_y += current_lines;
                     cursor_x = cursor_x.min(lines[current_line].len() + 5);
                     print!("{}", cursor::Goto(cursor_x, cursor_y));
                     stdout().flush()?;
@@ -120,6 +156,50 @@ fn main() -> io::Result<()> {
                             Key::Char('i') => {
                                 mode = Mode::Insert;
                                 show_mode(&mode)?;
+                                print!("{}", cursor::Goto(cursor_x, cursor_y));
+                                stdout().flush()?;
+                            }
+                            Key::Char('x') => {
+                                let relative_x = (cursor_x - 5) as usize;
+                                let line = &mut lines[current_line];
+                                if relative_x < line.content.len() {
+                                    line.content.remove(relative_x);
+                                    redraw_from(&lines, cursor_y)?;
+                                    print!("{}", cursor::Goto(cursor_x, cursor_y));
+                                    stdout().flush()?;
+                                }
+                            }
+                            Key::Char('o') => {
+                                mode = Mode::Insert;
+                                show_mode(&mode)?;
+                                lines.insert(current_line + 1, Line::new());
+                                
+                                // 计算当前行占用的屏幕行数
+                                let current_lines = lines[current_line].screen_lines(term_width);
+                                current_line += 1;
+                                cursor_y += current_lines;
+                                cursor_x = 5;
+                                
+                                redraw_from(&lines[current_line..], cursor_y)?;
+                                print!("{}", cursor::Goto(cursor_x, cursor_y));
+                                stdout().flush()?;
+                            }
+                            Key::Char('O') => {
+                                mode = Mode::Insert;
+                                show_mode(&mode)?;
+                                lines.insert(current_line, Line::new());
+                                cursor_x = 5;
+                                redraw_from(&lines[current_line..], cursor_y)?;
+                                print!("{}", cursor::Goto(cursor_x, cursor_y));
+                                stdout().flush()?;
+                            }
+                            Key::Char('0') => {
+                                cursor_x = 5;
+                                print!("{}", cursor::Goto(cursor_x, cursor_y));
+                                stdout().flush()?;
+                            }
+                            Key::Char('$') => {
+                                cursor_x = lines[current_line].len() + 5;
                                 print!("{}", cursor::Goto(cursor_x, cursor_y));
                                 stdout().flush()?;
                             }
@@ -138,9 +218,10 @@ fn main() -> io::Result<()> {
                                 }
                             }
                             Key::Char('k') => {
-                                if cursor_y > 3 && current_line > 0 {
+                                if cursor_y > 4 && current_line > 0 {
+                                    let prev_lines = lines[current_line - 1].screen_lines(term_width);
                                     current_line -= 1;
-                                    cursor_y -= 1;
+                                    cursor_y -= prev_lines;
                                     cursor_x = cursor_x.min(lines[current_line].len() + 5);
                                     print!("{}", cursor::Goto(cursor_x, cursor_y));
                                     stdout().flush()?;
@@ -148,8 +229,9 @@ fn main() -> io::Result<()> {
                             }
                             Key::Char('j') => {
                                 if current_line < lines.len() - 1 {
+                                    let current_lines = lines[current_line].screen_lines(term_width);
                                     current_line += 1;
-                                    cursor_y += 1;
+                                    cursor_y += current_lines;
                                     cursor_x = cursor_x.min(lines[current_line].len() + 5);
                                     print!("{}", cursor::Goto(cursor_x, cursor_y));
                                     stdout().flush()?;
@@ -163,7 +245,6 @@ fn main() -> io::Result<()> {
                             Key::Esc => {
                                 mode = Mode::Normal;
                                 show_mode(&mode)?;
-                                // 在普通模式下，如果光标在行尾，需要向左移动一格
                                 if cursor_x > lines[current_line].len() + 5 {
                                     cursor_x -= 1;
                                 }
@@ -172,18 +253,16 @@ fn main() -> io::Result<()> {
                             }
                             Key::Char(c) => {
                                 if c == '\n' {
-                                    // 创建新行
                                     lines.insert(current_line + 1, Line::new());
+                                    let current_lines = lines[current_line].screen_lines(term_width);
                                     current_line += 1;
-                                    cursor_y += 1;
+                                    cursor_y += current_lines;
                                     cursor_x = 5;
-                                    print!("\r\n");
-                                    draw_line_number(cursor_y)?;
+                                    redraw_from(&lines[current_line..], cursor_y)?;
                                     print!("{}", cursor::Goto(cursor_x, cursor_y));
                                 } else {
                                     let relative_x = (cursor_x - 5) as usize;
                                     let line = &mut lines[current_line];
-                                    // 确保字符串长度足够
                                     while line.content.len() < relative_x {
                                         line.content.push(' ');
                                     }
@@ -192,8 +271,9 @@ fn main() -> io::Result<()> {
                                     } else {
                                         line.content.insert(relative_x, c);
                                     }
-                                    print!("{}", c);
+                                    redraw_from(&lines[current_line..], cursor_y)?;
                                     cursor_x += 1;
+                                    print!("{}", cursor::Goto(cursor_x, cursor_y));
                                 }
                                 stdout().flush()?;
                             }
@@ -203,7 +283,7 @@ fn main() -> io::Result<()> {
                                     let line = &mut lines[current_line];
                                     if relative_x < line.content.len() {
                                         line.content.remove(relative_x);
-                                        print!("\x08{} \x08", &line.content[relative_x..]);
+                                        redraw_from(&lines[current_line..], cursor_y)?;
                                         cursor_x -= 1;
                                         print!("{}", cursor::Goto(cursor_x, cursor_y));
                                         stdout().flush()?;
