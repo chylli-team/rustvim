@@ -9,6 +9,7 @@ use termion::terminal_size;
 use crate::buffer::Buffer;
 use crate::cursor::Cursor;
 
+#[derive(Debug, Copy, Clone)]
 pub enum Mode {
     Normal,
     Insert,
@@ -24,9 +25,9 @@ impl Mode {
 }
 
 pub struct Editor {
-    buffer: Buffer,
-    cursor: Cursor,
-    mode: Mode,
+    pub buffer: Buffer,
+    pub cursor: Cursor,
+    pub mode: Mode,
 }
 
 impl Editor {
@@ -112,7 +113,7 @@ impl Editor {
         stdout().flush()
     }
 
-    fn handle_key(&mut self, key: Key) -> io::Result<bool> {
+    pub fn handle_key(&mut self, key: Key) -> io::Result<bool> {
         match key {
             Key::Ctrl('c') => return Ok(false),
             Key::Left => self.cursor.move_left(&self.buffer)?,
@@ -130,7 +131,7 @@ impl Editor {
         Ok(true)
     }
 
-    fn handle_normal_mode(&mut self, key: Key) -> io::Result<()> {
+    pub fn handle_normal_mode(&mut self, key: Key) -> io::Result<()> {
         match key {
             Key::Char('i') => {
                 self.mode = Mode::Insert;
@@ -146,7 +147,7 @@ impl Editor {
         Ok(())
     }
 
-    fn handle_insert_mode(&mut self, key: Key) -> io::Result<()> {
+    pub fn handle_insert_mode(&mut self, key: Key) -> io::Result<()> {
         match key {
             Key::Esc => {
                 self.mode = Mode::Normal;
