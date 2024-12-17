@@ -39,10 +39,25 @@ impl Editor {
         })
     }
 
+    fn set_cursor_style(&self) -> io::Result<()> {
+        match self.mode {
+            Mode::Normal => {
+                // Set block cursor
+                print!("\x1b[2 q");
+            }
+            Mode::Insert => {
+                // Set vertical line cursor
+                print!("\x1b[6 q");
+            }
+        }
+        stdout().flush()
+    }
+
     pub fn run(&mut self) -> io::Result<()> {
         let _raw = stdout().into_raw_mode()?;
         
         self.init_screen()?;
+        self.set_cursor_style()?;
         self.draw()?;
         
         let stdin = io::stdin();
@@ -135,6 +150,7 @@ impl Editor {
         match key {
             Key::Char('i') => {
                 self.mode = Mode::Insert;
+                self.set_cursor_style()?;
             }
             Key::Char('h') => self.cursor.move_left(&self.buffer)?,
             Key::Char('l') => self.cursor.move_right(&self.buffer)?,
@@ -151,6 +167,7 @@ impl Editor {
         match key {
             Key::Esc => {
                 self.mode = Mode::Normal;
+                self.set_cursor_style()?;
             }
             Key::Char(c) => {
                 if c == '\n' {
